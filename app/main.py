@@ -6,7 +6,8 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
 
-from app import cryptobot, db
+from app.cryptobot import cryptobot
+from app import db
 from app.tribute import Tribute
 from app.config import config
 from app.handlers import router

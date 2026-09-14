@@ -12,6 +12,6 @@ COPY app ./app
 
 RUN mkdir -p /app/data
 
-EXPOSE 8080
+EXPOSE 3000
 
-CMD ["python", "-m", "app.main"]
+CMD ["sh", "-c", "mkdir -p ${DB_DIR:-/app/data} && exec python -m app.main"]

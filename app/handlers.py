@@ -94,7 +94,7 @@ async def cb_buy(cb: CallbackQuery) -> None:
 async def _send_invoice(message: Message, days: int, tg_id: int | None = None) -> None:
     tg_id = tg_id or message.from_user.id
     price = _price(days)
-    inv = await cryptobot.create_invoice(tg_id, days)
+    inv = await cryptobot.create_invoice(amount=price, asset=config.crypto_asset, description=str(tg_id))
 
     # фиксируем цену инвойса, чтобы вебхук знал срок подписки
     await db.save_payment("cryptobot", inv["invoice_id"], tg_id,

@@ -140,7 +140,7 @@ async def cb_check(cb: CallbackQuery) -> None:
 
 
 def _days_for(invoice_id: int) -> int:
-    from app.state import PLAN_BY_INVOICE
+    from app.webhooks import PLAN_BY_INVOICE
     return PLAN_BY_INVOICE.get(str(invoice_id), 30)
 
 

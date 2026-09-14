@@ -14,7 +14,7 @@ from app.keyboards import sub_keyboard, tariff_keyboard
 log = logging.getLogger(__name__)
 router = Router()
 
-PRICES = {30: 1.0, 90: 3.6}          # множитель к базовой цене
+PRICES = {30: 1.0, 90: 3.6}
 
 
 def _fmt(ts: int) -> str:
@@ -41,34 +41,6 @@ async def _status_text(tg_id: int) -> str:
 @router.message(Command("start"))
 async def cmd_start(message: Message, command: CommandObject) -> None:
     await message.answer("✅ Бот работает!")
-
-    # deep-link оплаты: /start pay_30
-    if command.args and command.args.startswith("pay_"):
-        try:
-            days = int(command.args.split("_", 1)[1])
-            await _send_invoice(message, days)
-            return
-        except (ValueError, IndexError):
-            pass
-
-    active = await db.active_subscription(message.from_user.id)
-    if active:
-        await message.answer(
-            f"✅ Доступ уже открыт.\n\n{await _status_text(message.from_user.id)}\n\n"
-            "Продлить можно той же кнопкой — дни просто сложатся.",
-            reply_markup=sub_keyboard(_price(30), config.crypto_asset),
-            parse_mode="HTML",
-        )
-        return
-
-    await message.answer(
-        "👋 Привет! Здесь оформляется подписка на закрытый канал.\n\n"
-        "Оплата — криптой через @CryptoBot, моментально и без регистрации.\n"
-        "После оплаты бот сразу пришлёт одноразовую ссылку в канал.",
-        reply_markup=tariff_keyboard(),
-    )
-    await message.answer("Выбери тариф:",
-                         reply_markup=sub_keyboard(_price(30), config.crypto_asset))
 
 
 @router.callback_query(F.data == "start")
@@ -97,7 +69,6 @@ async def _send_invoice(message: Message, days: int, tg_id: int | None = None) -
     price = _price(days)
     inv = await cryptobot.create_invoice(amount=price, asset=config.crypto_asset, description=str(tg_id))
 
-    # фиксируем цену инвойса, чтобы вебхук знал срок подписки
     await db.save_payment("cryptobot", inv["invoice_id"], tg_id,
                           price, config.crypto_asset, "pending")
     from app.webhooks import PLAN_BY_INVOICE

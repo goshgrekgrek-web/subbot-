@@ -6,7 +6,8 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, Message, PreCheckoutQuery
 
-from app import access, cryptobot, db, tribute
+from app.cryptobot import cryptobot
+from app import access, db, tribute
 from app.config import config
 from app.keyboards import sub_keyboard, tariff_keyboard
 

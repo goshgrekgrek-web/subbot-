@@ -1,4 +1,10 @@
-"""Клиент Crypto Pay API (@CryptoBot)."""
+"""
+Клиент Crypto Pay (@CryptoBot).
+
+Два режима:
+  1. Исходящие платежи: createInvoice()
+  2. Входящие вебхуки: verify_webhook() + parse_payment()
+"""
 from __future__ import annotations
 import hashlib
 import hmac
@@ -12,7 +18,7 @@ API = "https://pay.crypt.bot/api"
 log = logging.getLogger(__name__)
 
 
-class CryptoPay:
+class CryptoPayClient:
     def __init__(self, token: str):
         self._token = token
         self._session: aiohttp.ClientSession | None = None
@@ -29,46 +35,57 @@ class CryptoPay:
         if self._session and not self._session.closed:
             await self._session.close()
 
-    async def _call(self, method: str, **params):
+    async def _post(self, path: str, **data):
         s = await self._s()
-        async with s.post(f"{API}/{method}", json=params) as r:
-            data = await r.json()
-        if not data.get("ok"):
-            raise RuntimeError(f"CryptoPay {method}: {data}")
-        return data["result"]
+        async with s.post(f"{API}{path}", json=data) as r:
+            r.raise_for_status()
+            return await r.json()
 
     async def get_me(self):
-        return await self._call("getMe")
+        """Получить информацию о приложении."""
+        result = await self._post("/getMe")
+        return result.get("result", {})
 
-    async def create_invoice(self, tg_id: int, days: int) -> dict:
-        """Возвращает {invoice_id, pay_url}. Именно pay_url, не mini_app_invoice_url:
-        обычная ссылка открывается на любом устройстве."""
-        return await self._call(
-            "createInvoice",
-            currency_type=config.crypto_currency_type,   # 'crypto' | 'fiat'
-            asset=config.crypto_asset,
-            amount=config.crypto_price,
-            description=f"Подписка на {days} дн.",
-            payload=str(tg_id),                          # сюда кладём tg_id
-            expires_in=3600,
-            allow_comments=False,
-            allow_anonymous=False,
-        )
+    async def create_invoice(self, amount: str, asset: str, **kwargs):
+        """Создать инвойс для оплаты."""
+        payload = {"amount": amount, "asset": asset, **kwargs}
+        result = await self._post("/createInvoice", **payload)
+        return result.get("result", {})
 
-    async def get_invoices(self, invoice_ids: list[int]) -> list[dict]:
-        return await self._call("getInvoices", invoice_ids=",".join(map(str, invoice_ids)))
+    async def get_invoices(self, invoice_ids: list = None, **kwargs):
+        """Получить список инвойсов."""
+        payload = kwargs.copy()
+        if invoice_ids:
+            payload["invoice_ids"] = ",".join(map(str, invoice_ids))
+        result = await self._post("/getInvoices", **payload)
+        return result.get("result", {})
 
-    async def get_balance(self):
-        return await self._call("getBalance")
+
+cryptobot = CryptoPayClient(config.crypto_token)
 
 
 def verify_webhook(body: bytes, signature: str) -> bool:
-    """crypto-pay-api-signature = HMAC-SHA256(sha256(token), body)."""
-    if not signature:
+    """Заголовок crypto-pay-api-signature: HMAC-SHA256(SHA256(token), body)."""
+    if not signature or not config.crypto_token:
         return False
-    secret = hashlib.sha256(config.crypto_token.encode()).digest()
-    calc = hmac.new(secret, body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(calc, signature)
+    token_hash = hashlib.sha256(config.crypto_token.encode()).digest()
+    calc = hmac.new(token_hash, body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(calc, signature.strip())
 
 
-crypto = CryptoPay(config.crypto_token)
+def parse_payment(payload: dict) -> dict | None:
+    """Вытаскиваем информацию из вебхука Crypto Pay.
+
+    Структура: {"update_id": ..., "update_type": "invoice_paid", "payload": {...}}
+    """
+    if payload.get("update_type") != "invoice_paid":
+        return None
+    inv = payload.get("payload") or {}
+    return {
+        "invoice_id": inv.get("invoice_id"),
+        "amount": inv.get("amount"),
+        "asset": inv.get("asset"),
+        "status": inv.get("status"),
+        "paid_at": inv.get("paid_at"),
+        "payload": inv.get("payload"),  # наше description
+    }

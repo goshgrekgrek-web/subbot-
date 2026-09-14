@@ -56,9 +56,6 @@ class Tribute:
         return await self._get("/products")
 
 
-tribute = Tribute(config.tribute_api_key)
-
-
 def verify_webhook(body: bytes, signature: str) -> bool:
     """Заголовок trbt-signature: HMAC-SHA256 тела запроса вашим API key."""
     if not signature or not config.tribute_webhook_secret:

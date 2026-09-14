@@ -40,7 +40,10 @@ async def _status_text(tg_id: int) -> str:
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, command: CommandObject) -> None:
-    await message.answer("✅ Бот работает!")
+    text = await _status_text(message.from_user.id)
+    await message.answer(text + "\n\nВыбери тариф:",
+                        reply_markup=sub_keyboard(_price(30), config.crypto_asset),
+                        parse_mode="HTML")
 
 
 @router.callback_query(F.data == "start")

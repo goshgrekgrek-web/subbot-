@@ -74,8 +74,8 @@ async def _send_invoice(message: Message, days: int, tg_id: int | None = None) -
 
     await db.save_payment("cryptobot", inv["invoice_id"], tg_id,
                           price, config.crypto_asset, "pending")
-    from app.webhooks import PLAN_BY_INVOICE
-    PLAN_BY_INVOICE[str(inv["invoice_id"])] = days
+    from app import webhooks
+    webhooks.PLAN_BY_INVOICE[str(inv["invoice_id"])] = days
     await db.audit("bot", "invoice_created", tg_id,
                    f"inv={inv['invoice_id']} days={days} price={price}")
 

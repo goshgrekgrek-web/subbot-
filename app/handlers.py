@@ -40,7 +40,7 @@ async def _status_text(tg_id: int) -> str:
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, command: CommandObject) -> None:
-    await db.upsert_user(message.from_user.id, message.from_user.username)
+    await message.answer("✅ Бот работает!")
 
     # deep-link оплаты: /start pay_30
     if command.args and command.args.startswith("pay_"):

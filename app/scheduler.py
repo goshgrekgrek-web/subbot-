@@ -7,45 +7,60 @@ from app import access, db
 
 log = logging.getLogger(__name__)
 
-WARN_WINDOW = 3 * 86400      # за 3 дня до конца
-TICK = 300                   # проверка раз в 5 минут
+TICK = 300  # каждые 5 минут
 
 
 async def _kick_expired(bot: Bot) -> None:
-    for sub in await db.expired_batch():
+    # Tribute удаляет своих подписчиков сам. Здесь управляем только CryptoBot.
+    for sub in await db.expired_batch(source="cryptobot"):
         tg_id = sub["tg_id"]
-        # Не выкидываем, если у человека живой доступ из другого источника (Tribute).
+        await db.mark_expired(sub["id"])
+
+        # Если есть другая действующая подписка, например Tribute, не удаляем.
         if await access.has_any_paid_access(tg_id):
-            await db.mark_expired(sub["id"])
             continue
 
         await access.revoke_access(bot, tg_id)
-        await db.mark_expired(sub["id"])
-        await db.audit("scheduler", "subscription_expired", tg_id, sub["source"])
+        await db.audit("scheduler", "subscription_expired", tg_id, "cryptobot")
         try:
             await bot.send_message(
                 tg_id,
-                "⏳ Подписка закончилась, доступ к каналу закрыт.\n\n"
-                "Продлить можно в любой момент — жми /start, "
-                "вернём в канал за минуту.",
+                "⏳ Подписка CryptoBot закончилась, доступ к DeluxePRV закрыт.\n\n"
+                "Чтобы продлить подписку, нажми /start.",
             )
         except Exception:
             pass
+
+
+async def _send_reminder(bot: Bot, sub, key: str, text: str) -> None:
+    if not await db.claim_reminder(sub["id"], key):
+        return
+    try:
+        await bot.send_message(sub["tg_id"], text)
+        await db.audit("scheduler", f"expiry_reminder_{key}", sub["tg_id"], "cryptobot")
+    except Exception as e:
+        log.warning("Не доставил напоминание %s: %s", sub["tg_id"], e)
 
 
 async def _remind(bot: Bot) -> None:
-    # окно [2d, 3d] — чтобы не спамить каждые 5 минут
-    for sub in await db.expiring_soon(2 * 86400, WARN_WINDOW):
-        tg_id = sub["tg_id"]
-        try:
-            await bot.send_message(
-                tg_id,
-                "🔔 Напоминание: подписка истекает через 3 дня.\n"
-                "Продли сейчас, чтобы не терять доступ — /start",
-            )
-            await db.audit("scheduler", "expiry_reminder", tg_id)
-        except Exception:
-            pass
+    # Окна шириной 10 минут при цикле 5 минут.
+    for sub in await db.expiring_soon(
+        3 * 86400 - 300, 3 * 86400 + 300, source="cryptobot"
+    ):
+        await _send_reminder(
+            bot, sub, "3d",
+            "🔔 Подписка DeluxePRV закончится через 3 дня.\n"
+            "Продли сейчас, чтобы не потерять доступ — /start",
+        )
+
+    for sub in await db.expiring_soon(
+        86400 - 300, 86400 + 300, source="cryptobot"
+    ):
+        await _send_reminder(
+            bot, sub, "1d",
+            "⚠️ Подписка DeluxePRV закончится примерно через 1 день.\n"
+            "Продлить подписку можно здесь — /start",
+        )
 
 
 async def scheduler_loop(bot: Bot) -> None:

@@ -104,7 +104,15 @@ async def cb_check(cb: CallbackQuery) -> None:
     """Ручная проверка на случай, если вебхук не дошёл."""
     inv_id = int(cb.data.split(":")[1])
     await cb.answer("Проверяю…")
-    invoices = await cryptobot.get_invoices([inv_id])
+    result = await cryptobot.get_invoices([inv_id])
+    # Crypto Pay getInvoices возвращает {"items": [...]}
+    if isinstance(result, dict):
+        invoices = result.get("items") or []
+    elif isinstance(result, list):
+        invoices = result
+    else:
+        invoices = []
+
     if not invoices:
         await cb.message.answer("Счёт не найден.")
         return

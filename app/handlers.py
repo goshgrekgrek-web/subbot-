@@ -132,7 +132,7 @@ async def cb_check(cb: CallbackQuery) -> None:
         await cb.message.answer(
             "✅ Оплата найдена! Подписка активна.\n\n"
             "Нажми кнопку ниже — бот автоматически примет твою заявку в канал.",
-            reply_markup=kb.as_markup(),
+            reply_markup=kb,
         )
     else:
         await cb.message.answer(f"Пока не оплачен (статус: {inv.get('status')}). "
@@ -178,8 +178,11 @@ async def cmd_restore_crypto(message: Message) -> None:
     await db.add_subscription(tg_id, "cryptobot", "restore_paid_invoice", 30)
 
     link = await access.make_join_request_link(message.bot, tg_id, 30)
-    kb = InlineKeyboardBuilder()
-    kb.button(text="🚀 Вступить в DeluxePRV", url=link)
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🚀 Вступить в DeluxePRV", url=link)]
+        ]
+    )
     await db.audit("admin", "restore_crypto_30d", tg_id)
     await message.answer(
         "✅ Оплаченные 30 дней CryptoBot восстановлены.\n"

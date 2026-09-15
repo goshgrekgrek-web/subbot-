@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import CallbackQuery, Message, PreCheckoutQuery
+from aiogram.types import CallbackQuery, Message, PreCheckoutQuery, ChatJoinRequest
 
 from app.cryptobot import cryptobot
 from app import access, db, tribute
@@ -83,7 +83,7 @@ async def _send_invoice(message: Message, days: int, tg_id: int | None = None) -
     inv = await cryptobot.create_invoice(amount=price, asset=config.crypto_asset, description=str(tg_id))
 
     await db.save_payment("cryptobot", inv["invoice_id"], tg_id,
-                          price, config.crypto_asset, "pending")
+                          price, config.crypto_asset, "pending", plan_days=days)
     from app.state import PLAN_BY_INVOICE
     PLAN_BY_INVOICE[str(inv["invoice_id"])] = days
     await db.audit("bot", "invoice_created", tg_id,
@@ -111,13 +111,21 @@ async def cb_check(cb: CallbackQuery) -> None:
     inv = invoices[0]
     if inv.get("status") == "paid":
         tg_id = int(inv.get("payload") or cb.from_user.id)
-        days = _days_for(inv_id)
+        payment = await db.get_payment("cryptobot", str(inv_id))
+        days = int(payment["plan_days"]) if payment and payment["plan_days"] else _days_for(inv_id)
         await db.add_subscription(tg_id, "cryptobot", str(inv_id), days)
         await db.save_payment("cryptobot", inv_id, tg_id,
                               inv.get("amount"), inv.get("asset"), "paid")
-        link = await access.make_invite_link(cb.bot, tg_id, days)
-        await cb.message.answer(f"✅ Оплата найдена!\n\nСсылка в канал:\n{link}",
-                                disable_web_page_preview=True)
+        link = await access.make_join_request_link(cb.bot, tg_id, days)
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🚀 Вступить в DeluxePRV", url=link)
+        ]])
+        await cb.message.answer(
+            "✅ Оплата найдена! Подписка активна.\n\n"
+            "Нажми кнопку ниже — бот автоматически примет твою заявку в канал.",
+            reply_markup=kb,
+        )
     else:
         await cb.message.answer(f"Пока не оплачен (статус: {inv.get('status')}). "
                                 "Попробуй через минуту.")
@@ -126,6 +134,30 @@ async def cb_check(cb: CallbackQuery) -> None:
 def _days_for(invoice_id: int) -> int:
     from app.state import PLAN_BY_INVOICE
     return PLAN_BY_INVOICE.get(str(invoice_id), 30)
+
+
+@router.chat_join_request()
+async def on_join_request(req: ChatJoinRequest) -> None:
+    if req.chat.id != config.channel_id:
+        return
+    tg_id = req.from_user.id
+    if await access.approve_paid_join(req.bot, tg_id):
+        try:
+            await req.bot.send_message(
+                tg_id,
+                "✅ Добро пожаловать в DeluxePRV! Доступ активирован."
+            )
+        except Exception:
+            pass
+    else:
+        try:
+            await req.bot.decline_chat_join_request(config.channel_id, tg_id)
+            await req.bot.send_message(
+                tg_id,
+                "Подписка CryptoBot не найдена. Оформить доступ можно через /start."
+            )
+        except Exception:
+            pass
 
 
 @router.message(Command("admin"))

@@ -1,15 +1,20 @@
 from __future__ import annotations
 import logging
+import asyncio
 from datetime import datetime, timezone
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 from aiogram.types import CallbackQuery, Message, PreCheckoutQuery, ChatJoinRequest, InlineKeyboardMarkup, InlineKeyboardButton
 
 from app.cryptobot import cryptobot
 from app import access, db, tribute
 from app.config import config
-from app.keyboards import sub_keyboard, tariff_keyboard, crypto_tariff_keyboard
+from app.keyboards import (sub_keyboard, tariff_keyboard, crypto_tariff_keyboard,
+                           broadcast_pay_keyboard, broadcast_confirm_keyboard)
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -56,6 +61,7 @@ async def _status_text(tg_id: int) -> str:
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, command: CommandObject) -> None:
+    await db.upsert_user(message.from_user.id, message.from_user.username)
     text = await _status_text(message.from_user.id)
     active = (
         await db.active_subscription(message.from_user.id, "cryptobot")
@@ -199,6 +205,126 @@ async def on_join_request(req: ChatJoinRequest) -> None:
             )
         except Exception:
             pass
+
+
+
+class BroadcastState(StatesGroup):
+    waiting_post = State()
+    waiting_confirm = State()
+
+
+@router.message(Command("broadcast"))
+async def cmd_broadcast(message: Message, state: FSMContext) -> None:
+    if message.from_user.id not in config.admin_ids:
+        return
+
+    await state.clear()
+    await state.set_state(BroadcastState.waiting_post)
+    await message.answer(
+        "📣 <b>Новая рассылка</b>\n\n"
+        "Отправь мне <b>одно фото с подписью</b> — именно так пост будет выглядеть "
+        "у пользователей.\n\n"
+        "Я покажу предпросмотр и только после твоего подтверждения отправлю его всем.",
+        parse_mode="HTML",
+    )
+
+
+@router.message(BroadcastState.waiting_post, F.photo)
+async def broadcast_get_post(message: Message, state: FSMContext) -> None:
+    if message.from_user.id not in config.admin_ids:
+        return
+
+    photo_id = message.photo[-1].file_id
+    caption = message.caption or ""
+    caption_entities = message.caption_entities or []
+
+    await state.update_data(
+        photo_id=photo_id,
+        caption=caption,
+        caption_entities=caption_entities,
+    )
+    await state.set_state(BroadcastState.waiting_confirm)
+
+    await message.answer("👀 <b>Предпросмотр:</b>", parse_mode="HTML")
+    await message.answer_photo(
+        photo=photo_id,
+        caption=caption or None,
+        caption_entities=caption_entities or None,
+        reply_markup=broadcast_pay_keyboard(),
+    )
+    await message.answer(
+        "Отправляем этот пост всем пользователям бота?",
+        reply_markup=broadcast_confirm_keyboard(),
+    )
+
+
+@router.message(BroadcastState.waiting_post)
+async def broadcast_need_photo(message: Message) -> None:
+    if message.from_user.id not in config.admin_ids:
+        return
+    await message.answer("Пришли именно <b>фото с подписью</b> одним сообщением.", parse_mode="HTML")
+
+
+@router.callback_query(BroadcastState.waiting_confirm, F.data == "broadcast:cancel")
+async def broadcast_cancel(cb: CallbackQuery, state: FSMContext) -> None:
+    if cb.from_user.id not in config.admin_ids:
+        return
+    await state.clear()
+    await cb.message.edit_text("❌ Рассылка отменена.")
+    await cb.answer()
+
+
+@router.callback_query(BroadcastState.waiting_confirm, F.data == "broadcast:send")
+async def broadcast_send(cb: CallbackQuery, state: FSMContext) -> None:
+    if cb.from_user.id not in config.admin_ids:
+        return
+
+    data = await state.get_data()
+    photo_id = data.get("photo_id")
+    caption = data.get("caption") or None
+    caption_entities = data.get("caption_entities") or None
+
+    if not photo_id:
+        await state.clear()
+        await cb.answer("Пост не найден. Запусти /broadcast заново.", show_alert=True)
+        return
+
+    # Сразу закрываем состояние, чтобы двойной клик не запустил вторую рассылку.
+    await state.clear()
+    await cb.message.edit_text("⏳ Рассылка запущена…")
+    await cb.answer()
+
+    user_ids = await db.all_user_ids()
+    sent = 0
+    failed = 0
+
+    for tg_id in user_ids:
+        try:
+            await cb.bot.send_photo(
+                chat_id=tg_id,
+                photo=photo_id,
+                caption=caption,
+                caption_entities=caption_entities,
+                reply_markup=broadcast_pay_keyboard(),
+            )
+            sent += 1
+        except (TelegramForbiddenError, TelegramBadRequest):
+            failed += 1
+        except Exception:
+            failed += 1
+            log.exception("Ошибка рассылки пользователю %s", tg_id)
+
+        # Консервативно держимся ниже массовых лимитов Telegram.
+        await asyncio.sleep(0.06)
+
+    await cb.bot.send_message(
+        cb.from_user.id,
+        "✅ <b>Рассылка завершена</b>\n\n"
+        f"📨 Отправлено: <b>{sent}</b>\n"
+        f"🚫 Не доставлено: <b>{failed}</b>\n"
+        f"👥 Всего в базе: <b>{len(user_ids)}</b>",
+        parse_mode="HTML",
+    )
 
 
 @router.message(Command("admin"))

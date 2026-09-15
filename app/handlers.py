@@ -9,12 +9,12 @@ from aiogram.types import CallbackQuery, Message, PreCheckoutQuery
 from app.cryptobot import cryptobot
 from app import access, db, tribute
 from app.config import config
-from app.keyboards import sub_keyboard, tariff_keyboard
+from app.keyboards import sub_keyboard, tariff_keyboard, crypto_tariff_keyboard
 
 log = logging.getLogger(__name__)
 router = Router()
 
-PRICES = {30: 1.0, 90: 3.6}
+CRYPTO_PRICES = {30: "11", 90: "33", 365: "133"}
 
 
 def _fmt(ts: int) -> str:
@@ -22,9 +22,10 @@ def _fmt(ts: int) -> str:
 
 
 def _price(days: int) -> str:
-    base = float(config.crypto_price)
-    total = base * (days / 30) * (1.0 if days == 30 else 0.8)
-    return f"{total:g}"
+    try:
+        return CRYPTO_PRICES[days]
+    except KeyError:
+        raise ValueError(f"Неизвестный тариф: {days} дней")
 
 
 async def _status_text(tg_id: int) -> str:
@@ -41,14 +42,14 @@ async def _status_text(tg_id: int) -> str:
 @router.message(Command("start"))
 async def cmd_start(message: Message, command: CommandObject) -> None:
     text = await _status_text(message.from_user.id)
-    await message.answer(text + "\n\nВыбери тариф:",
+    await message.answer(text + "\n\nВыбери способ оплаты:",
                         reply_markup=sub_keyboard(_price(30), config.crypto_asset),
                         parse_mode="HTML")
 
 
 @router.callback_query(F.data == "start")
 async def cb_start(cb: CallbackQuery) -> None:
-    await cb.message.answer("Выбери тариф:",
+    await cb.message.answer("Выбери способ оплаты:",
                             reply_markup=sub_keyboard(_price(30), config.crypto_asset))
     await cb.answer()
 
@@ -56,6 +57,15 @@ async def cb_start(cb: CallbackQuery) -> None:
 @router.callback_query(F.data == "status")
 async def cb_status(cb: CallbackQuery) -> None:
     await cb.message.answer(await _status_text(cb.from_user.id), parse_mode="HTML")
+    await cb.answer()
+
+
+@router.callback_query(F.data == "paymethod:crypto")
+async def cb_crypto_method(cb: CallbackQuery) -> None:
+    await cb.message.answer(
+        "Выбери тариф CryptoBot:",
+        reply_markup=crypto_tariff_keyboard(),
+    )
     await cb.answer()
 
 

@@ -31,3 +31,19 @@ def tariff_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="↩️ Назад к тарифам", callback_data="start")],
     ])
+
+
+def broadcast_pay_keyboard() -> InlineKeyboardMarkup:
+    """Кнопки оплаты под рекламной рассылкой."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💎 Оплатить 11 USDT", callback_data="buy:30")],
+        [InlineKeyboardButton(text="💳 Оплатить 1000 ₽ картой", url="https://t.me/tribute/app?startapp=s16lb")],
+    ])
+
+
+def broadcast_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Подтверждение админской рассылки."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚀 Отправить всем", callback_data="broadcast:send")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="broadcast:cancel")],
+    ])

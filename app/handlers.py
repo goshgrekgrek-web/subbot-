@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import CallbackQuery, Message, PreCheckoutQuery, ChatJoinRequest
+from aiogram.types import CallbackQuery, Message, PreCheckoutQuery, ChatJoinRequest, InlineKeyboardMarkup, InlineKeyboardButton
 
 from app.cryptobot import cryptobot
 from app import access, db, tribute
@@ -175,7 +175,7 @@ async def cmd_restore_crypto(message: Message) -> None:
         return
 
     tg_id = message.from_user.id
-    await db.add_subscription(tg_id, "cryptobot", "restore_paid_invoice", 30)
+    await db.upsert_subscription_until(tg_id, "cryptobot", "restore_paid_invoice", 30, db.now() + 30 * 86400)
 
     link = await access.make_join_request_link(message.bot, tg_id, 30)
     kb = InlineKeyboardMarkup(

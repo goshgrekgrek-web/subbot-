@@ -7,7 +7,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, Message, PreCheckoutQuery, ChatJoinRequest, InlineKeyboardMarkup, InlineKeyboardButton
 
 from app.cryptobot import cryptobot
-from app import access, db, tribute, scheduler
+from app import access, db, tribute
 from app.config import config
 from app.keyboards import sub_keyboard, tariff_keyboard, crypto_tariff_keyboard
 
@@ -199,33 +199,6 @@ async def on_join_request(req: ChatJoinRequest) -> None:
             )
         except Exception:
             pass
-
-
-@router.message(Command("test_reminder"))
-async def cmd_test_reminder(message: Message) -> None:
-    """Временный безопасный тест напоминаний. Срок подписки не меняет."""
-    if message.from_user.id not in config.admin_ids:
-        return
-
-    sub = await db.active_subscription(message.from_user.id, "cryptobot")
-    if not sub:
-        await message.answer("❌ Активная подписка для теста не найдена.")
-        return
-
-    await scheduler._send_reminder(
-        message.bot,
-        sub,
-        "test_3d",
-        "🔔 Подписка на канал DeluxePRV закончится через 3 дня.\n\n"
-        "Продли подписку заранее, чтобы не потерять доступ — /start",
-    )
-    await scheduler._send_reminder(
-        message.bot,
-        sub,
-        "test_1d",
-        "⚠️ Подписка на канал DeluxePRV закончится завтра.\n\n"
-        "Продли подписку, чтобы сохранить доступ — /start",
-    )
 
 
 @router.message(Command("admin"))

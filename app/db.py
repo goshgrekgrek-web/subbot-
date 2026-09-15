@@ -57,6 +57,13 @@ CREATE TABLE IF NOT EXISTS audit_log (
     details    TEXT,
     created_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS sent_reminders (
+    subscription_id INTEGER NOT NULL,
+    reminder_key    TEXT NOT NULL,
+    sent_at         INTEGER NOT NULL,
+    PRIMARY KEY (subscription_id, reminder_key)
+);
 """
 
 
@@ -79,6 +86,10 @@ async def init_db() -> None:
     os.makedirs(os.path.dirname(config.db_path) or ".", exist_ok=True)
     async with conn() as db:
         await db.executescript(SCHEMA)
+        cur = await db.execute("PRAGMA table_info(payments)")
+        cols = {row[1] for row in await cur.fetchall()}
+        if "plan_days" not in cols:
+            await db.execute("ALTER TABLE payments ADD COLUMN plan_days INTEGER")
         await db.commit()
 
 
@@ -156,12 +167,16 @@ async def cancel_subscription(tg_id: int, source: str) -> bool:
         return cur.rowcount > 0
 
 
-async def expired_batch(limit: int = 100):
+async def expired_batch(limit: int = 100, source: str | None = None):
     async with conn() as db:
-        cur = await db.execute(
-            "SELECT * FROM subscriptions WHERE status='active' AND expires_at<=? LIMIT ?",
-            (now(), limit),
-        )
+        q = "SELECT * FROM subscriptions WHERE status='active' AND expires_at<=?"
+        args = [now()]
+        if source:
+            q += " AND source=?"
+            args.append(source)
+        q += " LIMIT ?"
+        args.append(limit)
+        cur = await db.execute(q, tuple(args))
         return await cur.fetchall()
 
 
@@ -171,29 +186,81 @@ async def mark_expired(sub_id: int) -> None:
         await db.commit()
 
 
-async def expiring_soon(min_sec: int, max_sec: int):
-    """Кому напомнить: активные, истекающие в окне [min_sec, max_sec] от сейчас."""
+async def expiring_soon(min_sec: int, max_sec: int, source: str | None = None):
+    """Активные подписки, истекающие в заданном окне."""
     async with conn() as db:
-        cur = await db.execute(
-            "SELECT * FROM subscriptions WHERE status='active' AND expires_at BETWEEN ? AND ?",
-            (now() + min_sec, now() + max_sec),
-        )
+        q = ("SELECT * FROM subscriptions WHERE status='active' "
+             "AND expires_at BETWEEN ? AND ?")
+        args = [now() + min_sec, now() + max_sec]
+        if source:
+            q += " AND source=?"
+            args.append(source)
+        cur = await db.execute(q, tuple(args))
         return await cur.fetchall()
 
 
+async def claim_reminder(subscription_id: int, reminder_key: str) -> bool:
+    """True только один раз для конкретного напоминания."""
+    async with conn() as db:
+        cur = await db.execute(
+            "INSERT OR IGNORE INTO sent_reminders(subscription_id, reminder_key, sent_at) "
+            "VALUES(?,?,?)",
+            (subscription_id, reminder_key, now()),
+        )
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def upsert_subscription_until(tg_id: int, source: str, external_id: str,
+                                    plan_days: int, expires_at: int) -> int:
+    """Синхронизирует внешнюю подписку с точной датой окончания."""
+    t = now()
+    async with conn() as db:
+        cur = await db.execute(
+            "SELECT id FROM subscriptions WHERE tg_id=? AND source=? AND status='active' "
+            "ORDER BY expires_at DESC LIMIT 1",
+            (tg_id, source),
+        )
+        row = await cur.fetchone()
+        if row:
+            await db.execute(
+                "UPDATE subscriptions SET external_id=?, plan_days=?, expires_at=? WHERE id=?",
+                (external_id, plan_days, expires_at, row["id"]),
+            )
+        else:
+            await db.execute(
+                "INSERT INTO subscriptions(tg_id, source, external_id, plan_days, "
+                "started_at, expires_at, status, created_at) VALUES(?,?,?,?,?,?,'active',?)",
+                (tg_id, source, external_id, plan_days, t, expires_at, t),
+            )
+        await db.commit()
+    return expires_at
+
+
 async def save_payment(provider: str, external_id: str, tg_id: int | None,
-                       amount: str, asset: str, status: str) -> None:
+                       amount: str, asset: str, status: str,
+                       plan_days: int | None = None) -> None:
     t = now()
     async with conn() as db:
         await db.execute(
             "INSERT INTO payments(provider, external_id, tg_id, amount, asset, status,"
-            " created_at, paid_at) VALUES(?,?,?,?,?,?,?,?) "
+            " created_at, paid_at, plan_days) VALUES(?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(provider, external_id) DO UPDATE SET status=excluded.status,"
-            " paid_at=excluded.paid_at, tg_id=COALESCE(excluded.tg_id, payments.tg_id)",
+            " paid_at=excluded.paid_at, tg_id=COALESCE(excluded.tg_id, payments.tg_id),"
+            " plan_days=COALESCE(excluded.plan_days, payments.plan_days)",
             (provider, str(external_id), tg_id, str(amount), asset, status, t,
-             t if status == "paid" else None),
+             t if status == "paid" else None, plan_days),
         )
         await db.commit()
+
+
+async def get_payment(provider: str, external_id: str):
+    async with conn() as db:
+        cur = await db.execute(
+            "SELECT * FROM payments WHERE provider=? AND external_id=? LIMIT 1",
+            (provider, str(external_id)),
+        )
+        return await cur.fetchone()
 
 
 async def stats() -> dict:

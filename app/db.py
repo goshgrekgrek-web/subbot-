@@ -277,3 +277,11 @@ async def stats() -> dict:
             "ico": await one("SELECT COUNT(*) FROM payments WHERE status='paid' AND provider='cryptobot'"),
             "tribute": await one("SELECT COUNT(*) FROM payments WHERE status='paid' AND provider='tribute'"),
         }
+
+
+async def all_user_ids() -> list[int]:
+    """Все пользователи, которые запускали бота и были сохранены в users."""
+    async with conn() as db:
+        cur = await db.execute("SELECT tg_id FROM users ORDER BY created_at")
+        rows = await cur.fetchall()
+        return [int(row["tg_id"]) for row in rows]

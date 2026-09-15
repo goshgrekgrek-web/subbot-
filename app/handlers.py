@@ -168,29 +168,6 @@ async def on_join_request(req: ChatJoinRequest) -> None:
             pass
 
 
-@router.message(Command("restore_crypto"))
-async def cmd_restore_crypto(message: Message) -> None:
-    """ВРЕМЕННАЯ админ-команда: восстановить 30 дней CryptoBot и выдать новый вход."""
-    if message.from_user.id not in config.admin_ids:
-        return
-
-    tg_id = message.from_user.id
-    await db.upsert_subscription_until(tg_id, "cryptobot", "restore_paid_invoice", 30, db.now() + 30 * 86400)
-
-    link = await access.make_join_request_link(message.bot, tg_id, 30)
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🚀 Вступить в DeluxePRV", url=link)]
-        ]
-    )
-    await db.audit("admin", "restore_crypto_30d", tg_id)
-    await message.answer(
-        "✅ Оплаченные 30 дней CryptoBot восстановлены.\n"
-        "Нажми кнопку ниже, чтобы снова вступить в DeluxePRV.",
-        reply_markup=kb,
-    )
-
-
 @router.message(Command("admin"))
 async def cmd_admin(message: Message) -> None:
     if message.from_user.id not in config.admin_ids:

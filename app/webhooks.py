@@ -38,26 +38,28 @@ async def cryptopay_webhook(request: web.Request) -> web.Response:
     if not tg_id:
         return web.Response(status=200)
 
-    days = request.app["plan_days"]
-    from app.state import PLAN_BY_INVOICE
-    days = PLAN_BY_INVOICE.get(str(inv["invoice_id"]), days)
+    payment = await db.get_payment("cryptobot", str(inv["invoice_id"]))
+    days = int(payment["plan_days"]) if payment and payment["plan_days"] else request.app["plan_days"]
     bot: Bot = request.app["bot"]
 
     expiry = await db.add_subscription(tg_id, "cryptobot", str(inv["invoice_id"]), days)
     await db.save_payment("cryptobot", inv["invoice_id"], tg_id,
-                          inv.get("amount"), inv.get("asset"), "paid")
+                          inv.get("amount"), inv.get("asset"), "paid", plan_days=days)
     await db.audit("cryptobot", "subscription_activated", tg_id,
                    f"{days}d, inv={inv['invoice_id']}")
 
     try:
-        link = await access.make_invite_link(bot, tg_id, days)
+        link = await access.make_join_request_link(bot, tg_id, days)
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🚀 Вступить в DeluxePRV", url=link)
+        ]])
         await bot.send_message(
             tg_id,
             f"✅ Оплата получена — подписка активна до <b>{_fmt(expiry)}</b>.\n\n"
-            f"Вот ссылка в закрытый канал:\n{link}\n\n"
-            f"Она одноразовая, действует 30 минут.",
+            "Нажми кнопку ниже. Заявка в канал будет принята автоматически.",
             parse_mode="HTML",
-            disable_web_page_preview=True,
+            reply_markup=kb,
         )
     except Exception as e:  # не роняем вебхук из-за доставки
         log.exception("Не смог отправить ссылку %s: %s", tg_id, e)
@@ -86,7 +88,13 @@ async def tribute_webhook(request: web.Request) -> web.Response:
         if info:
             await db.upsert_user(info["tg_id"], None)
             await db.save_payment("tribute", info["subscription_id"],
-                                  info["tg_id"], None, None, "paid")
+                                  info["tg_id"], None, None, "paid",
+                                  plan_days=info.get("days"))
+            if info.get("expires_at"):
+                await db.upsert_subscription_until(
+                    info["tg_id"], "tribute", str(info["subscription_id"]),
+                    int(info.get("days") or 30), int(info["expires_at"])
+                )
             await db.audit("tribute", name, info["tg_id"], str(info))
             log.info("Tribute %s: %s", name, info)
 

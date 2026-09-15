@@ -175,7 +175,7 @@ async def cmd_restore_crypto(message: Message) -> None:
         return
 
     tg_id = message.from_user.id
-    await db.add_subscription(tg_id, 30, "cryptobot")
+    await db.add_subscription(tg_id, "cryptobot", "restore_paid_invoice", 30)
 
     link = await access.make_join_request_link(message.bot, tg_id, 30)
     kb = InlineKeyboardMarkup(

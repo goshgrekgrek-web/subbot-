@@ -29,28 +29,61 @@ def _price(days: int) -> str:
 
 
 async def _status_text(tg_id: int) -> str:
-    rows = []
-    for src, label in (("cryptobot", "💎 CryptoBot"), ("tribute", "🎁 Tribute")):
-        sub = await db.active_subscription(tg_id, src)
+    active = []
+    for source in ("cryptobot", "tribute"):
+        sub = await db.active_subscription(tg_id, source)
         if sub:
-            rows.append(f"{label}: активна до <b>{_fmt(sub['expires_at'])}</b>")
-    if not rows:
-        return "У тебя пока нет активной подписки."
-    return "Твой доступ:\n" + "\n".join(rows)
+            active.append(sub)
+
+    if not active:
+        return (
+            "👋 <b>Привет!</b>\n\n"
+            "Здесь ты можешь оформить подписку на мой закрытый Telegram-канал "
+            "<b>DeluxePRV</b>.\n\n"
+            "💳 Стоимость подписки на 1 месяц — <b>1000 ₽ / 11 USDT</b>.\n\n"
+            "👇 <b>Выбери удобный способ оплаты:</b>"
+        )
+
+    # Пользователю не важно, через какого провайдера оплачено:
+    # показываем единый статус канала и самую позднюю активную дату.
+    expires_at = max(sub["expires_at"] for sub in active)
+    return (
+        "💎 <b>DeluxePRV</b>\n\n"
+        "✅ Подписка на канал активна\n"
+        f"📅 Доступ до: <b>{_fmt(expires_at)}</b>"
+    )
 
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, command: CommandObject) -> None:
     text = await _status_text(message.from_user.id)
-    await message.answer(text + "\n\nВыбери способ оплаты:",
-                        reply_markup=sub_keyboard(_price(30), config.crypto_asset),
-                        parse_mode="HTML")
+    active = (
+        await db.active_subscription(message.from_user.id, "cryptobot")
+        or await db.active_subscription(message.from_user.id, "tribute")
+    )
+    if active:
+        text += "\n\n👇 <b>Продлить подписку:</b>"
+    await message.answer(
+        text,
+        reply_markup=sub_keyboard(_price(30), config.crypto_asset),
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(F.data == "start")
 async def cb_start(cb: CallbackQuery) -> None:
-    await cb.message.answer("Выбери способ оплаты:",
-                            reply_markup=sub_keyboard(_price(30), config.crypto_asset))
+    text = await _status_text(cb.from_user.id)
+    active = (
+        await db.active_subscription(cb.from_user.id, "cryptobot")
+        or await db.active_subscription(cb.from_user.id, "tribute")
+    )
+    if active:
+        text += "\n\n👇 <b>Продлить подписку:</b>"
+    await cb.message.answer(
+        text,
+        reply_markup=sub_keyboard(_price(30), config.crypto_asset),
+        parse_mode="HTML",
+    )
     await cb.answer()
 
 

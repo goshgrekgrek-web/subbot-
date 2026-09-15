@@ -168,6 +168,32 @@ async def on_join_request(req: ChatJoinRequest) -> None:
             pass
 
 
+@router.message(Command("test_expire"))
+async def cmd_test_expire(message: Message) -> None:
+    """ВРЕМЕННАЯ команда для проверки автоудаления. Только для ADMIN_IDS."""
+    if message.from_user.id not in config.admin_ids:
+        return
+
+    tg_id = message.from_user.id
+    sub = await db.active_subscription(tg_id, "cryptobot")
+    if not sub:
+        await message.answer("❌ Активная CryptoBot-подписка для этого аккаунта не найдена.")
+        return
+
+    async with db.conn() as conn:
+        await conn.execute(
+            "UPDATE subscriptions SET expires_at=? WHERE id=?",
+            (db.now() - 1, sub["id"]),
+        )
+        await conn.commit()
+
+    await db.audit("admin", "test_expire", tg_id, str(sub["id"]))
+    await message.answer(
+        "🧪 Тест запущен: срок CryptoBot-подписки установлен как истёкший.\n"
+        "Планировщик проверяет базу каждые 5 минут. Подожди до 5–6 минут."
+    )
+
+
 @router.message(Command("admin"))
 async def cmd_admin(message: Message) -> None:
     if message.from_user.id not in config.admin_ids:
